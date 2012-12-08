@@ -24,12 +24,10 @@
 
 module AP_MODULE_DECLARE_DATA dumpost_module;
 
-static void dumpit(ap_filter_t *f, apr_bucket *b, apr_pool_t *mp, char *buf, apr_size_t *current_size)
+static void dumpit(ap_filter_t *f, apr_bucket *b, char *buf, apr_size_t *current_size)
 {
-    conn_rec *c = f->c;
-   
     dumpost_conf_t *conf_ptr =
-    (dumpost_conf_t *) ap_get_module_config(c->base_server->module_config, &dumpost_module);
+    (dumpost_conf_t *) ap_get_module_config(f->c->base_server->module_config, &dumpost_module);
        
 
     if (!(APR_BUCKET_IS_METADATA(b))) {
@@ -42,56 +40,65 @@ static void dumpit(ap_filter_t *f, apr_bucket *b, apr_pool_t *mp, char *buf, apr
                 *current_size += nbytes;
             }
         } else {
-            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, c->base_server,
-                 "dumpost:  %s (%s-%s) [%s]: %s",
-                 f->frec->name,
-                 (APR_BUCKET_IS_METADATA(b)) ? "metadata" : "data",
-                 b->type->name,
-                 c->remote_ip,
-                 "error reading data");
+            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->c->base_server,
+                 "mod_dumpost: error reading data");
         }
     }
 }
-
-int print = 0;
 
 apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
     ap_input_mode_t mode, apr_read_type_e block, apr_off_t readbytes)
 {
     apr_bucket *b;
     apr_status_t ret;
-    conn_rec *c = f->c;
-    dumpost_conf_t *conf_ptr =
-        (dumpost_conf_t *) ap_get_module_config(c->base_server->module_config, &dumpost_module);
-
-    ret = ap_get_brigade(f->next, bb, mode, block, readbytes);
-    if (ret == APR_SUCCESS) {
+    /* restoring state */
+    request_state *state = f->ctx;
+    if (state == NULL) {
+        /* create state if not yet */
         apr_pool_t *mp;
-        apr_status_t ret1;
-        if ( (ret1 = apr_pool_create(&mp, NULL)) != APR_SUCCESS) {
-            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, c->base_server, "mod_dumpost: can't allocate memory");
-            return ret1;
+        if (ret = apr_pool_create(&mp, NULL) != APR_SUCCESS) {
+            ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->c->base_server, "mod_dumpost: unable to create memory pool");
+            return ret;
         }
+        f->ctx = state = (request_state *) apr_palloc(mp, sizeof *state);
+        state->mp = mp;
+        state->reach_body = 0;
+        state->body_size = 0;
+    } 
 
-        char *buf;
-        buf = apr_palloc(mp, conf_ptr->max_size);
-        apr_size_t buf_len = 0;
-        for (b = APR_BRIGADE_FIRST(bb); b != APR_BRIGADE_SENTINEL(bb); b = APR_BUCKET_NEXT(b)) 
-            dumpit(f, b, mp, buf + buf_len, &buf_len);
-        if (buf_len) {
+    dumpost_conf_t *conf =
+        (dumpost_conf_t *) ap_get_module_config(f->c->base_server->module_config, &dumpost_module);
+
+    if (ret = ap_get_brigade(f->next, bb, mode, block, readbytes) != APR_SUCCESS)
+        return ret;
+
+    char *buf = apr_palloc(state->mp, conf->max_size);
+    apr_size_t buf_len = 0;
+    for (b = APR_BRIGADE_FIRST(bb); b != APR_BRIGADE_SENTINEL(bb); b = APR_BUCKET_NEXT(b)) 
+        if (state->body_size != -1)
+            dumpit(f, b, buf + buf_len, &buf_len);
+
+    if (state->body_size == -1) return APR_SUCCESS;
+
+    if (buf_len) {
+        buf[buf_len] = '\0';
+        if (state->reach_body) {
+            buf_len = min(buf_len, conf->max_size - state->body_size);
             buf[buf_len] = '\0';
-            if (print)
-                ap_log_error(APLOG_MARK, APLOG_INFO, 0, c->base_server,
-                        "[client: %s] %s",
-                        c->remote_ip, buf);
-            if ( strstr(buf,"\r\n") == buf ) 
-                print=1;
-        } else print = 0;
-        
-        apr_pool_destroy(mp);
-    }
+            ap_log_error(APLOG_MARK, APLOG_INFO, 0, f->c->base_server,
+                    "[client: %s] %s", f->c->remote_ip, buf);
+            state->body_size += buf_len;
 
-    return ret;
+            if (state->body_size == conf->max_size){
+                ap_log_error(APLOG_MARK, APLOG_WARNING, 0, f->c->base_server, "mod_dumpost: [client %s] body limit reach", f->c->remote_ip);
+                state->body_size = -1;
+            }
+        }
+        if ( strcmp(buf,"\r\n") == 0 )
+            state->reach_body = 1;
+    } 
+
+    return APR_SUCCESS;
 }
 
 static int dumpost_pre_conn(conn_rec *c, void *csd)
@@ -114,14 +121,16 @@ static void *dumpost_create_sconfig(apr_pool_t *mp, server_rec *s) {
     return conf_ptr;
 }
 
-static const char *dumpost_set_max_size(cmd_parms *cmd, void *dummy, int arg) {
+static const char *dumpost_set_max_size(cmd_parms *cmd, void *dummy, const char *arg) {
     dumpost_conf_t *conf_ptr = ap_get_module_config(cmd->server->module_config, &dumpost_module);
-    conf_ptr->max_size = arg;
+    conf_ptr->max_size = atoi(arg);
+    if (conf_ptr->max_size == 0) 
+        conf_ptr->max_size = DEFAULT_MAX_SIZE;
     return NULL;
 }
 
 static const command_rec dumpost_cmds[] = {
-    AP_INIT_FLAG("DumpPostMaxSize", dumpost_set_max_size, NULL,  RSRC_CONF, "Set maximum data size"),
+    AP_INIT_TAKE1("DumpPostMaxSize", dumpost_set_max_size, NULL,  RSRC_CONF, "Set maximum data size"),
     { NULL }
 };
 

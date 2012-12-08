@@ -1,5 +1,8 @@
-all: mod_dumpost.c
+all: mod_dumpost.c mod_dumpost.h
 	apxs2 -c mod_dumpost.c
+
+debug: mod_dumpost.c mod_dumpost.h
+	apxs2 -Wc,-g3 -c mod_dumpost.c
 
 install: all
 	sudo apxs2 -i -a -n dumpost mod_dumpost.la
