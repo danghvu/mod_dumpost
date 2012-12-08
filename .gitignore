@@ -2,8 +2,11 @@
 *.o
 
 # Libraries
+.libs/*
 *.lib
 *.a
+*.l*
+*.s*
 
 # Shared objects (inc. Windows DLLs)
 *.dll
