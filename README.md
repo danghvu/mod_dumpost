@@ -7,6 +7,8 @@ Small apache module to log body content of request (POST / FORM data). Data are 
 [Sat Dec 08 09:58:43 2012] [info] [client: 1.1.1.1] a=100
 ```
 
+Note: You can do the same with mod_security, use this when you want a quick and lightweight solution.
+
 ##Installation:
 ```
 make

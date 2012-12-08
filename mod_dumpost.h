@@ -11,7 +11,6 @@ typedef struct dumpost_conf_t {
 
 typedef struct {
     apr_pool_t *mp;
-    int reach_body;
     int body_size;
 } request_state;
 

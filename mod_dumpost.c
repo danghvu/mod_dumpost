@@ -24,11 +24,10 @@
 
 module AP_MODULE_DECLARE_DATA dumpost_module;
 
-static void dumpit(ap_filter_t *f, apr_bucket *b, char *buf, apr_size_t *current_size)
-{
+static void dumpit(ap_filter_t *f, apr_bucket *b, char *buf, apr_size_t *current_size) {
+
     dumpost_conf_t *conf_ptr =
-    (dumpost_conf_t *) ap_get_module_config(f->c->base_server->module_config, &dumpost_module);
-       
+        (dumpost_conf_t *) ap_get_module_config(f->c->base_server->module_config, &dumpost_module);
 
     if (!(APR_BUCKET_IS_METADATA(b))) {
         const char * ibuf;
@@ -41,14 +40,14 @@ static void dumpit(ap_filter_t *f, apr_bucket *b, char *buf, apr_size_t *current
             }
         } else {
             ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->c->base_server,
-                 "mod_dumpost: error reading data");
+                    "mod_dumpost: error reading data");
         }
     }
 }
 
 apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
-    ap_input_mode_t mode, apr_read_type_e block, apr_off_t readbytes)
-{
+        ap_input_mode_t mode, apr_read_type_e block, apr_off_t readbytes) {
+
     apr_bucket *b;
     apr_status_t ret;
     /* restoring state */
@@ -56,13 +55,12 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
     if (state == NULL) {
         /* create state if not yet */
         apr_pool_t *mp;
-        if (ret = apr_pool_create(&mp, NULL) != APR_SUCCESS) {
+        if (ret = apr_pool_create(&mp, f->r->pool) != APR_SUCCESS) {
             ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, f->c->base_server, "mod_dumpost: unable to create memory pool");
             return ret;
         }
         f->ctx = state = (request_state *) apr_palloc(mp, sizeof *state);
         state->mp = mp;
-        state->reach_body = 0;
         state->body_size = 0;
     } 
 
@@ -75,44 +73,35 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
     char *buf = apr_palloc(state->mp, conf->max_size);
     apr_size_t buf_len = 0;
     for (b = APR_BRIGADE_FIRST(bb); b != APR_BRIGADE_SENTINEL(bb); b = APR_BUCKET_NEXT(b)) 
-        if (state->body_size != -1)
-            dumpit(f, b, buf + buf_len, &buf_len);
+        dumpit(f, b, buf + buf_len, &buf_len);
 
     if (state->body_size == -1) return APR_SUCCESS;
 
     if (buf_len) {
+        buf_len = min(buf_len, conf->max_size - state->body_size);
         buf[buf_len] = '\0';
-        if (state->reach_body) {
-            buf_len = min(buf_len, conf->max_size - state->body_size);
-            buf[buf_len] = '\0';
-            ap_log_error(APLOG_MARK, APLOG_INFO, 0, f->c->base_server,
-                    "[client: %s] %s", f->c->remote_ip, buf);
-            state->body_size += buf_len;
+        ap_log_error(APLOG_MARK, APLOG_INFO, 0, f->c->base_server,
+                "[client: %s] %s", f->c->remote_ip, buf);
+        state->body_size += buf_len;
 
-            if (state->body_size == conf->max_size){
-                ap_log_error(APLOG_MARK, APLOG_WARNING, 0, f->c->base_server, "mod_dumpost: [client %s] body limit reach", f->c->remote_ip);
-                state->body_size = -1;
-            }
+        if (state->body_size == conf->max_size){
+            ap_log_error(APLOG_MARK, APLOG_WARNING, 0, f->c->base_server, "mod_dumpost: [client %s] body limit reach", f->c->remote_ip);
+            state->body_size = -1;
         }
-        if ( strcmp(buf,"\r\n") == 0 )
-            state->reach_body = 1;
     } 
 
     return APR_SUCCESS;
 }
 
-static int dumpost_pre_conn(conn_rec *c, void *csd)
-{
-    ap_add_input_filter("DUMPOST_IN", NULL, NULL, c);
-
+static int dumpost_insert_filter( request_rec *req) {
+    ap_add_input_filter("DUMPOST_IN", NULL, req, req->connection);
     return OK;
 }
 
-static void dumpost_register_hooks(apr_pool_t *p)
-{
-  ap_register_input_filter("DUMPOST_IN", dumpost_input_filter,
-	NULL, AP_FTYPE_CONNECTION + 3) ;
-  ap_hook_pre_connection(dumpost_pre_conn, NULL, NULL, APR_HOOK_MIDDLE);
+static void dumpost_register_hooks(apr_pool_t *p) {
+    ap_hook_insert_filter(dumpost_insert_filter, NULL, NULL, APR_HOOK_FIRST);
+    ap_register_input_filter("DUMPOST_IN", dumpost_input_filter,
+            NULL, AP_FTYPE_CONTENT_SET);
 }
 
 static void *dumpost_create_sconfig(apr_pool_t *mp, server_rec *s) {
@@ -135,11 +124,11 @@ static const command_rec dumpost_cmds[] = {
 };
 
 module AP_MODULE_DECLARE_DATA dumpost_module = {
-	STANDARD20_MODULE_STUFF,
-	NULL,
-	NULL,
-	dumpost_create_sconfig,
-	NULL,
-	dumpost_cmds,
-	dumpost_register_hooks
+    STANDARD20_MODULE_STUFF,
+    NULL,
+    NULL,
+    dumpost_create_sconfig,
+    NULL,
+    dumpost_cmds,
+    dumpost_register_hooks
 };
