@@ -21,6 +21,7 @@
 #include "http_config.h"
 #include "http_core.h"
 #include "http_log.h"
+#include "http_request.h"
 
 #include "mod_dumpost.h"
 
@@ -57,7 +58,7 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
     if (state == NULL) {
         /* create state if not yet */
         apr_pool_t *mp;
-        if (ret = apr_pool_create(&mp, f->r->pool) != APR_SUCCESS) {
+        if ((ret = apr_pool_create(&mp, f->r->pool)) != APR_SUCCESS) {
             ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, f->r, "mod_dumpost: unable to create memory pool");
             return ret;
         }
@@ -70,7 +71,7 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
     dumpost_cfg_t *cfg =
         (dumpost_cfg_t *) ap_get_module_config(f->r->per_dir_config, &dumpost_module);
 
-    if (ret = ap_get_brigade(f->next, bb, mode, block, readbytes) != APR_SUCCESS)
+    if ((ret = ap_get_brigade(f->next, bb, mode, block, readbytes)) != APR_SUCCESS)
         return ret;
 
     char *buf = apr_palloc(state->mp, cfg->max_size);
@@ -114,9 +115,8 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
     return APR_SUCCESS;
 }
 
-static int dumpost_insert_filter( request_rec *req) {
+static void dumpost_insert_filter( request_rec *req) {
     ap_add_input_filter("DUMPOST_IN", NULL, req, req->connection);
-    return OK;
 }
 
 static void dumpost_register_hooks(apr_pool_t *p) {
@@ -143,7 +143,7 @@ static const char *dumpost_set_max_size(cmd_parms *cmd, void *_cfg, const char *
 
 static const char *dumpost_add_header(cmd_parms *cmd, void *_cfg, const char *arg) {
     dumpost_cfg_t *cfg = (dumpost_cfg_t *) _cfg;
-    *((char**) apr_array_push(cfg->headers)) = arg; 
+    *(const char**) apr_array_push(cfg->headers) = arg; 
     return NULL;
 }
 
