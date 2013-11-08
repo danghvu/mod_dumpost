@@ -27,6 +27,23 @@
 
 module AP_MODULE_DECLARE_DATA dumpost_module;
 
+apr_status_t logit(ap_filter_t *f) {
+    request_state *state = f->ctx;
+    if (state == NULL) return -1;
+    state->buffer[state->log_size] = '\0';
+
+    DEBUG("len:%d", strlen(state->buffer));
+
+    // data is truncated to MAX_STRING_LEN ~ 8192 in apache
+    ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, f->r,
+                "\"%s\" %s", f->r->the_request, state->buffer);
+
+    //Not working on Apache2.2
+    //ap_log_rdata(APLOG_MARK, APLOG_INFO, f->r, "DUMPOST", state->buffer, state->log_size, 0);
+
+    return APR_SUCCESS;
+} 
+
 static void dumpit(ap_filter_t *f, apr_bucket *b, char *buf, apr_size_t *current_size) {
 
     dumpost_cfg_t *cfg =
@@ -46,24 +63,13 @@ static void dumpit(ap_filter_t *f, apr_bucket *b, char *buf, apr_size_t *current
                     "mod_dumpost: error reading data");
         }
     }
+    else {
+        if (APR_BUCKET_IS_EOS(b)) {
+		logit(f);
+	}
+    }
 }
 
-apr_status_t logit(ap_filter_t *f) {
-    request_state *state = f->ctx;
-    if (state == NULL) return -1;
-    state->buffer[state->log_size] = '\0';
-
-    DEBUG("len:%d", strlen(state->buffer));
-
-    // data is truncated to MAX_STRING_LEN ~ 8192 in apache
-    ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, f->r,
-                "\"%s\" %s", f->r->the_request, state->buffer);
-
-    //Not working on Apache2.2
-    //ap_log_rdata(APLOG_MARK, APLOG_INFO, f->r, "DUMPOST", state->buffer, state->log_size, 0);
-
-    return APR_SUCCESS;
-} 
 
 apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
         ap_input_mode_t mode, apr_read_type_e block, apr_off_t readbytes) {
@@ -87,8 +93,6 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
         state->log_size = 0;
         state->header_printed = 0;
         state->buffer = apr_palloc(state->mp, cfg->max_size);
-
-        apr_pool_pre_cleanup_register(f->r->pool, f, (apr_status_t (*)(void *))logit);
     } 
 
 
