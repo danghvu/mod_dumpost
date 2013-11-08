@@ -21,10 +21,28 @@
 #include "http_config.h"
 #include "http_core.h"
 #include "http_log.h"
+#include "http_request.h"
 
 #include "mod_dumpost.h"
 
 module AP_MODULE_DECLARE_DATA dumpost_module;
+
+apr_status_t logit(ap_filter_t *f) {
+    request_state *state = f->ctx;
+    if (state == NULL) return -1;
+    state->buffer[state->log_size] = '\0';
+
+    DEBUG("len:%ld", strlen(state->buffer));
+
+    // data is truncated to MAX_STRING_LEN ~ 8192 in apache
+    ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, f->r,
+                "\"%s\" %s", f->r->the_request, state->buffer);
+
+    //Not working on Apache2.2
+    //ap_log_rdata(APLOG_MARK, APLOG_INFO, f->r, "DUMPOST", state->buffer, state->log_size, 0);
+
+    return APR_SUCCESS;
+} 
 
 static void dumpit(ap_filter_t *f, apr_bucket *b, char *buf, apr_size_t *current_size) {
 
@@ -45,10 +63,19 @@ static void dumpit(ap_filter_t *f, apr_bucket *b, char *buf, apr_size_t *current
                     "mod_dumpost: error reading data");
         }
     }
+    else {
+        if (APR_BUCKET_IS_EOS(b)) {
+		logit(f);
+	}
+    }
 }
+
 
 apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
         ap_input_mode_t mode, apr_read_type_e block, apr_off_t readbytes) {
+
+    dumpost_cfg_t *cfg =
+        (dumpost_cfg_t *) ap_get_module_config(f->r->per_dir_config, &dumpost_module);
 
     apr_bucket *b;
     apr_status_t ret;
@@ -57,7 +84,7 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
     if (state == NULL) {
         /* create state if not yet */
         apr_pool_t *mp;
-        if (ret = apr_pool_create(&mp, f->r->pool) != APR_SUCCESS) {
+        if ((ret = apr_pool_create(&mp, f->r->pool)) != APR_SUCCESS) {
             ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, f->r, "mod_dumpost: unable to create memory pool");
             return ret;
         }
@@ -65,16 +92,15 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
         state->mp = mp;
         state->log_size = 0;
         state->header_printed = 0;
+        state->buffer = apr_palloc(state->mp, cfg->max_size);
     } 
 
-    dumpost_cfg_t *cfg =
-        (dumpost_cfg_t *) ap_get_module_config(f->r->per_dir_config, &dumpost_module);
 
-    if (ret = ap_get_brigade(f->next, bb, mode, block, readbytes) != APR_SUCCESS)
+    if ((ret = ap_get_brigade(f->next, bb, mode, block, readbytes)) != APR_SUCCESS)
         return ret;
 
-    char *buf = apr_palloc(state->mp, cfg->max_size);
-    apr_size_t buf_len = 0;
+    char *buf = state->buffer;
+    apr_size_t buf_len = state->log_size;
     char **headers = (cfg->headers->nelts > 0)?(char **) cfg->headers->elts : NULL;
 
     /* dump header if config */    
@@ -99,11 +125,8 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
             dumpit(f, b, buf + buf_len, &buf_len);
 
     if (buf_len && state->log_size != LOG_IS_FULL) {
-        buf_len = min(buf_len, cfg->max_size - state->log_size);
-        buf[buf_len] = '\0';
-        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, f->r,
-                "\"%s\" %s", f->r->the_request, buf);
-        state->log_size += buf_len;
+        buf_len = min(buf_len, cfg->max_size);
+	state->log_size = buf_len;
 
         if (state->log_size == cfg->max_size){
             ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, f->r, "mod_dumpost: body limit reach");
@@ -114,9 +137,8 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
     return APR_SUCCESS;
 }
 
-static int dumpost_insert_filter( request_rec *req) {
+static void dumpost_insert_filter( request_rec *req) {
     ap_add_input_filter("DUMPOST_IN", NULL, req, req->connection);
-    return OK;
 }
 
 static void dumpost_register_hooks(apr_pool_t *p) {
@@ -143,7 +165,7 @@ static const char *dumpost_set_max_size(cmd_parms *cmd, void *_cfg, const char *
 
 static const char *dumpost_add_header(cmd_parms *cmd, void *_cfg, const char *arg) {
     dumpost_cfg_t *cfg = (dumpost_cfg_t *) _cfg;
-    *((char**) apr_array_push(cfg->headers)) = arg; 
+    *(const char**) apr_array_push(cfg->headers) = arg; 
     return NULL;
 }
 

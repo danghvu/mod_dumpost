@@ -1,5 +1,5 @@
 all: mod_dumpost.c mod_dumpost.h
-	apxs2 -c mod_dumpost.c
+	apxs2 -Wc,-Wall -c mod_dumpost.c
 
 debug: mod_dumpost.c mod_dumpost.h
 	apxs2 -Wc,-g3 -c mod_dumpost.c
