@@ -32,7 +32,7 @@ apr_status_t logit(ap_filter_t *f) {
     if (state == NULL) return -1;
     state->buffer[state->log_size] = '\0';
 
-    DEBUG("len:%d", strlen(state->buffer));
+    DEBUG("len:%ld", strlen(state->buffer));
 
     // data is truncated to MAX_STRING_LEN ~ 8192 in apache
     ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, f->r,
