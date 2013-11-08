@@ -34,6 +34,7 @@ typedef struct {
     apr_pool_t *mp;
     int log_size;
     int header_printed;
+    char *buffer;
 } request_state;
 
 #endif
