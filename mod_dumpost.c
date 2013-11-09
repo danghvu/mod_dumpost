@@ -1,17 +1,17 @@
 /*******************************************************************************
  * Copyright (c) 2012 Hoang-Vu Dang <danghvu@gmail.com>
  * This file is part of mod_dumpost
- * 
+ *
  * mod_dumpost is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * mod_dumpost is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License
  * along with mod_dumpost. If not, see <http://www.gnu.org/licenses/>.
  ******************************************************************************/
@@ -53,7 +53,7 @@ apr_status_t logit(ap_filter_t *f) {
     if (state == NULL) return -1;
     state->buffer[state->log_size] = '\0';
 
-    DEBUG("len:%d", strlen(state->buffer));
+    DEBUG("len:%ld", strlen(state->buffer));
 
     // data is truncated to MAX_STRING_LEN ~ 8192 in apache
     ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, f->r,
@@ -63,7 +63,7 @@ apr_status_t logit(ap_filter_t *f) {
     //ap_log_rdata(APLOG_MARK, APLOG_INFO, f->r, "DUMPOST", state->buffer, state->log_size, 0);
 
     return APR_SUCCESS;
-} 
+}
 
 apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
         ap_input_mode_t mode, apr_read_type_e block, apr_off_t readbytes) {
@@ -89,7 +89,7 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
         state->buffer = apr_palloc(state->mp, cfg->max_size);
 
         apr_pool_pre_cleanup_register(f->r->pool, f, (apr_status_t (*)(void *))logit);
-    } 
+    }
 
 
     if ((ret = ap_get_brigade(f->next, bb, mode, block, readbytes)) != APR_SUCCESS)
@@ -99,9 +99,9 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
     apr_size_t buf_len = state->log_size;
     char **headers = (cfg->headers->nelts > 0)?(char **) cfg->headers->elts : NULL;
 
-    /* dump header if config */    
+    /* dump header if config */
     if (state->log_size != LOG_IS_FULL && headers!=NULL && !state->header_printed) {
-        int i=0; 
+        int i=0;
         for (;i<cfg->headers->nelts;i++) {
             const char *s = apr_table_get(f->r->headers_in, headers[i]);
             if (s == NULL) continue;
@@ -110,25 +110,25 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
             strncpy(buf + buf_len, s, len);
             buf_len += len + 1;
             buf[buf_len-1] = ' ';
-            if (buf_len == cfg->max_size) break;            
+            if (buf_len == cfg->max_size) break;
         }
         state->header_printed = 1;
     }
 
     /* dump body */
-    for (b = APR_BRIGADE_FIRST(bb); b != APR_BRIGADE_SENTINEL(bb); b = APR_BUCKET_NEXT(b)) 
-        if (state->log_size != LOG_IS_FULL && buf_len < cfg->max_size) 
+    for (b = APR_BRIGADE_FIRST(bb); b != APR_BRIGADE_SENTINEL(bb); b = APR_BUCKET_NEXT(b))
+        if (state->log_size != LOG_IS_FULL && buf_len < cfg->max_size)
             dumpit(f, b, buf + buf_len, &buf_len);
 
     if (buf_len && state->log_size != LOG_IS_FULL) {
         buf_len = min(buf_len, cfg->max_size);
-	state->log_size = buf_len;
+        state->log_size = buf_len;
 
         if (state->log_size == cfg->max_size){
             ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, f->r, "mod_dumpost: body limit reach");
             state->log_size = LOG_IS_FULL;
         }
-    } 
+    }
 
     return APR_SUCCESS;
 }
@@ -154,14 +154,14 @@ static void *dumpost_create_dconfig(apr_pool_t *mp, char *path) {
 static const char *dumpost_set_max_size(cmd_parms *cmd, void *_cfg, const char *arg) {
     dumpost_cfg_t *cfg = (dumpost_cfg_t *) _cfg; //ap_get_module_config(cmd->server->module_config, &dumpost_module);
     cfg->max_size = atoi(arg);
-    if (cfg->max_size == 0) 
+    if (cfg->max_size == 0)
         cfg->max_size = DEFAULT_MAX_SIZE;
     return NULL;
 }
 
 static const char *dumpost_add_header(cmd_parms *cmd, void *_cfg, const char *arg) {
     dumpost_cfg_t *cfg = (dumpost_cfg_t *) _cfg;
-    *(const char**) apr_array_push(cfg->headers) = arg; 
+    *(const char**) apr_array_push(cfg->headers) = arg;
     return NULL;
 }
 
