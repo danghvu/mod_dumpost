@@ -108,7 +108,7 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
         state->mp = mp;
         state->log_size = 0;
         state->header_printed = 0;
-        state->buffer = apr_palloc(state->mp, cfg->max_size);
+        state->buffer = apr_palloc(state->mp, cfg->max_size + 1); //1 byte more because string buffer is null terminated
         state->fd = NULL;
 
         if (cfg->file != 0)  {
