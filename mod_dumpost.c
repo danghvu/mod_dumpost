@@ -135,7 +135,7 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
             const char *s = apr_table_get(f->r->headers_in, headers[i]);
             if (s == NULL) continue;
             int len = strlen(s);
-            len = min(len, cfg->max_size - len);
+            len = min(len, cfg->max_size - buf_len);
             strncpy(buf + buf_len, s, len);
             buf_len += len + 1;
             buf[buf_len-1] = ' ';
