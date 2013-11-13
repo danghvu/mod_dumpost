@@ -33,7 +33,7 @@ static void dumpit(request_rec *r, apr_bucket *b, char *buf, apr_size_t *current
     dumpost_cfg_t *cfg =
         (dumpost_cfg_t *) ap_get_module_config(r->per_dir_config, &dumpost_module);
 
-    if (!(APR_BUCKET_IS_METADATA(b))) {
+    if (*current_size < cfg->max_size && !(APR_BUCKET_IS_METADATA(b))) {
         const char * ibuf;
         apr_size_t nbytes;
         if (apr_bucket_read(b, &ibuf, &nbytes, APR_BLOCK_READ) == APR_SUCCESS) {
