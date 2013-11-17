@@ -26,6 +26,8 @@
 #include "apr_strings.h"
 #include "mod_dumpost.h"
 
+#define DEBUG(request, format, ...) ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, request, format, __VA_ARGS__);
+
 module AP_MODULE_DECLARE_DATA dumpost_module;
 
 static void dumpit(request_rec *r, apr_bucket *b, char *buf, apr_size_t *current_size) {
@@ -33,11 +35,12 @@ static void dumpit(request_rec *r, apr_bucket *b, char *buf, apr_size_t *current
     dumpost_cfg_t *cfg =
         (dumpost_cfg_t *) ap_get_module_config(r->per_dir_config, &dumpost_module);
 
-    if (!(APR_BUCKET_IS_METADATA(b))) {
+    if (*current_size < cfg->max_size && !(APR_BUCKET_IS_METADATA(b))) {
         const char * ibuf;
         apr_size_t nbytes;
         if (apr_bucket_read(b, &ibuf, &nbytes, APR_BLOCK_READ) == APR_SUCCESS) {
             if (nbytes) {
+                DEBUG(r, "%ld bytes read from bucket for request %s", nbytes, r->the_request);
                 nbytes = min(nbytes, cfg->max_size - *current_size);
                 strncpy(buf, ibuf, nbytes);
                 *current_size += nbytes;
@@ -45,6 +48,11 @@ static void dumpit(request_rec *r, apr_bucket *b, char *buf, apr_size_t *current
         } else {
             ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
                     "mod_dumpost: error reading data");
+        }
+    }
+    else {
+        if (APR_BUCKET_IS_EOS(b)) {
+            DEBUG(r, "EOS bucket detected for request %s", r->the_request);
         }
     }
 }
@@ -108,7 +116,7 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
         state->mp = mp;
         state->log_size = 0;
         state->header_printed = 0;
-        state->buffer = apr_palloc(state->mp, cfg->max_size);
+        state->buffer = apr_palloc(state->mp, cfg->max_size + 1); //1 byte more because string buffer is null terminated
         state->fd = NULL;
 
         if (cfg->file != 0)  {
@@ -121,6 +129,7 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
               ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, f->r, "mod_dumpost: unable to open the log file: %s %s", cfg->file, buferr);
             }
         }
+	//This doesn't work for oldest apr versions but i can obtain same result in a cleaner way using macro APR_BUCKET_IS_EOS() in dumpit function to detect when data stream ends
         apr_pool_pre_cleanup_register(state->mp, f, (apr_status_t (*)(void *))logit);
     }
 
@@ -135,7 +144,7 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
             const char *s = apr_table_get(f->r->headers_in, headers[i]);
             if (s == NULL) continue;
             int len = strlen(s);
-            len = min(len, cfg->max_size - len);
+            len = min(len, cfg->max_size - buf_len);
             strncpy(buf + buf_len, s, len);
             buf_len += len + 1;
             buf[buf_len-1] = ' ';
@@ -148,9 +157,11 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
         return ret;
 
     /* dump body */
+    DEBUG(f->r, "Start brigade for request: %s", f->r->the_request)
     for (b = APR_BRIGADE_FIRST(bb); b != APR_BRIGADE_SENTINEL(bb); b = APR_BUCKET_NEXT(b))
         if (state->log_size != LOG_IS_FULL && buf_len < cfg->max_size)
             dumpit(f->r, b, buf + buf_len, &buf_len);
+    DEBUG(f->r, "End brigade for request: %s, buffer: %ld bytes", f->r->the_request, buf_len)
 
     if (buf_len && state->log_size != LOG_IS_FULL) {
         buf_len = min(buf_len, cfg->max_size);
