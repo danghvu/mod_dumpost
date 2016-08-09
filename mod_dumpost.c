@@ -115,6 +115,7 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
         f->ctx = state = (request_state *) apr_palloc(mp, sizeof *state);
         state->mp = mp;
         state->log_size = 0;
+        state->log_is_full = 0;
         state->header_printed = 0;
         state->buffer = apr_palloc(state->mp, cfg->max_size + 1); //1 byte more because string buffer is null terminated
         state->fd = NULL;
@@ -138,7 +139,7 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
     char **headers = (cfg->headers->nelts > 0)?(char **) cfg->headers->elts : NULL;
 
     /* dump header if config */
-    if (state->log_size != LOG_IS_FULL && headers!=NULL && !state->header_printed) {
+    if (!state->log_is_full && headers!=NULL && !state->header_printed) {
         int i=0;
         for (;i<cfg->headers->nelts;i++) {
             const char *s = apr_table_get(f->r->headers_in, headers[i]);
@@ -159,17 +160,17 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
     /* dump body */
     DEBUG(f->r, "Start brigade for request: %s", f->r->the_request)
     for (b = APR_BRIGADE_FIRST(bb); b != APR_BRIGADE_SENTINEL(bb); b = APR_BUCKET_NEXT(b))
-        if (state->log_size != LOG_IS_FULL && buf_len < cfg->max_size)
+        if (!state->log_is_full && buf_len < cfg->max_size)
             dumpit(f->r, b, buf + buf_len, &buf_len);
     DEBUG(f->r, "End brigade for request: %s, buffer: %ld bytes", f->r->the_request, buf_len)
 
-    if (buf_len && state->log_size != LOG_IS_FULL) {
+    if (buf_len && !state->log_is_full) {
         buf_len = min(buf_len, cfg->max_size);
         state->log_size = buf_len;
 
         if (state->log_size == cfg->max_size){
             ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, f->r, "mod_dumpost: body limit reach");
-            state->log_size = LOG_IS_FULL;
+            state->log_is_full = 1;
         }
     }
 
