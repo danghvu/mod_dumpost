@@ -9,21 +9,22 @@ Small apache module to log body content of request (POST / FORM data). Data are 
 
 Note: You can do the same with mod_security, use this when you want a quick and lightweight solution.
 
-###Installation:
+### Installation:
 ```
 make
 make install
 ```
 
-###Configuration:
+### Configuration:
 In `httpd.conf` (optional):
 * `DumpPostMaxSize 1024`: limit the size of a log entry to `1024` bytes (default value: `1048576` i.e. 1MB)
 * `DumpPostHeaderAdd Cookie Content-Type`:  add HTTP Header to log together with POST (default value: None)
-* `DumpPostLogFile`: specify a custom file to write the log entry (other than
-error log)
+* `DumpPostLogFile`: specify a custom file to write the log entry (other than error log)
+* `DumpPostLogBinary`: [On/Off] Save binary requests data in hex string format.
+* `DumpPostFilter`: add a filter to match on first header of request, if no filter is present all traffic will be dumped.
 
-###Requirement:
+### Requirement:
 * apxs:
     * Ubuntu: `sudo apt-get install apache2-threaded-dev`, edit Makefile change
       `apxs` to `apxs2`
-* `LogLevel` of at least `Info` (not important if using DumpPostLogFile)
+* `LogLevel` of at least `Info` (not important if using DumpPostLogFile) use `Debug` to investigate common problems with files and request sizes.

@@ -42,7 +42,8 @@ static void dumpit(request_rec *r, apr_bucket *b, char *buf, apr_size_t *current
             if (nbytes) {
                 DEBUG(r, "%ld bytes read from bucket for request %s", nbytes, r->the_request);
                 nbytes = min(nbytes, cfg->max_size - *current_size);
-                strncpy(buf, ibuf, nbytes);
+                //strncpy(buf, ibuf, nbytes);
+                for (int kk = 0; kk < nbytes; kk++) buf[kk]=ibuf[kk];
                 *current_size += nbytes;
             }
         } else {
@@ -54,6 +55,17 @@ static void dumpit(request_rec *r, apr_bucket *b, char *buf, apr_size_t *current
         if (APR_BUCKET_IS_EOS(b)) {
             DEBUG(r, "EOS bucket detected for request %s", r->the_request);
         }
+    }
+}
+
+void hexArrayToStr(unsigned char* info, unsigned int infoLength, char **buffer, unsigned int start) {
+    const char* pszNibbleToHex = {"0123456789ABCDEF"};
+    int nNibble, i;
+    for (i = 0; i < infoLength; i++) {
+		nNibble = info[i] >> 4;
+		buffer[0][2 * i + start] = pszNibbleToHex[nNibble];
+		nNibble = info[i] & 0x0F;
+		buffer[0][2 * i + 1 + start] = pszNibbleToHex[nNibble];
     }
 }
 
@@ -75,23 +87,58 @@ apr_status_t logit(ap_filter_t *f) {
       apr_ctime(time, r->request_time);
 
       // condition taken from mod_security
-#if AP_SERVER_MAJORVERSION_NUMBER > 1 && AP_SERVER_MINORVERSION_NUMBER > 2
+	  #if AP_SERVER_MAJORVERSION_NUMBER > 1 && AP_SERVER_MINORVERSION_NUMBER > 2
       char *ip = r->connection->client_ip;
-#else
+      #else
       char *ip = r->connection->remote_ip;
-#endif
-
+	  #endif
       apr_size_t nbytes_written;
-      char *text = apr_psprintf(r->pool, "[%s] %s \"%s\" %s\n",time, ip, r->the_request, state->buffer);
-      apr_status_t rc = apr_file_write_full(state->fd, text, strlen(text), &nbytes_written);
-
-      if (rc != APR_SUCCESS) {
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "mod_dumpost: error while writing to log");
-        return rc;
-      }
-      apr_file_close(state->fd);
+      char *text = apr_psprintf(r->pool, "[%s] %s \"%s\" ",time, ip, r->the_request);
+	  
+	  //Test buffer to search non ASCII characters
+	  int not_bin=1;
+	  for (int i = 0; i < state->log_size; i++)
+	  {
+		//if (state->buffer[i]==0) {
+		if (state->buffer[i]<0x20 || state->buffer[i]>0x7E) {
+			if (state->buffer[i]=='\n') continue;
+			if (state->buffer[i]=='\r') continue;
+			not_bin=0;
+			break;
+		}
+	  }
+	  
+	 int jj=strlen(text);
+	 dumpost_cfg_t *cfg = 
+				(dumpost_cfg_t *) ap_get_module_config(f->r->per_dir_config, &dumpost_module);
+	 
+	 apr_status_t rc;
+	 if (not_bin==0 && cfg->log_bin) {
+		 char *text2 = apr_palloc(r->pool, (state->log_size*2) + 2 + jj);
+		 sprintf(text2, "%s", text);
+		 hexArrayToStr((unsigned char*)state->buffer, state->log_size, &text2, jj);
+		 jj=jj+(state->log_size*2);
+		 text2[jj]='\n';
+		 jj++;
+		 text2[jj]='\0';
+		 rc = apr_file_write_full(state->fd, text2, jj, &nbytes_written);
+	 } else {
+		 if (not_bin==0) {
+			 ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "mod_dumpost: binary output is disabled, not dumping this request.");
+			 return APR_SUCCESS;
+		 }
+		 char *text2 = apr_palloc(r->pool, (state->log_size) + 2 + jj);
+		 sprintf(text2, "%s%s\n", text, state->buffer);
+		 jj=strlen(text2);
+		 rc = apr_file_write_full(state->fd, text2, jj, &nbytes_written);
+	 }
+	 if (rc != APR_SUCCESS) {
+		ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "mod_dumpost: error while writing to log");
+		return rc;
+	 }
+	 apr_file_close(state->fd);
+      
     }
-
     return APR_SUCCESS;
 }
 
@@ -102,9 +149,33 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
         (dumpost_cfg_t *) ap_get_module_config(f->r->per_dir_config, &dumpost_module);
 
     apr_bucket *b;
-    apr_status_t ret;
-    /* restoring state */
+	apr_status_t ret;
+	//Default status dont filter anything, dump all requests
+	int filter_this = 0;
+	char **filters = (cfg->filters->nelts > 0)?(char **) cfg->filters->elts : NULL;
+	if (filters!=NULL) {
+		//If theres filters present in config, discard all request until check.
+		filter_this = 1;
+        int fi=0;
+        for (;fi<cfg->filters->nelts;fi++) {
+			if (strstr(f->r->the_request, filters[fi]) != NULL) {
+				//This request will be dumped.
+				filter_this = 0;
+				break;
+			}
+		}
+	}
+	//In case of filtering this request, exit filter.
+	if (filter_this==1) {
+		//Continue the filtering and exit filter before allocating memory for this request.
+		if ((ret = ap_get_brigade(f->next, bb, mode, block, readbytes)) != APR_SUCCESS)
+			return ret;
+		return APR_SUCCESS;
+	}  
+
+	/* restoring state */
     request_state *state = f->ctx;
+
     if (state == NULL) {
         /* create state if not yet */
         apr_pool_t *mp;
@@ -130,7 +201,7 @@ apr_status_t dumpost_input_filter (ap_filter_t *f, apr_bucket_brigade *bb,
               ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, f->r, "mod_dumpost: unable to open the log file: %s %s", cfg->file, buferr);
             }
         }
-	//This doesn't work for oldest apr versions but i can obtain same result in a cleaner way using macro APR_BUCKET_IS_EOS() in dumpit function to detect when data stream ends
+		//This doesn't work for oldest apr versions but i can obtain same result in a cleaner way using macro APR_BUCKET_IS_EOS() in dumpit function to detect when data stream ends
         apr_pool_pre_cleanup_register(state->mp, f, (apr_status_t (*)(void *))logit);
     }
 
@@ -193,6 +264,8 @@ static void *dumpost_create_dconfig(apr_pool_t *mp, char *path) {
     cfg->headers = apr_array_make(mp, 0, sizeof(char *));
     cfg->pool = mp;
     cfg->file = 0;
+    cfg->log_bin = 0;
+	cfg->filters = apr_array_make(mp, 0, sizeof(char *));
     return cfg;
 }
 
@@ -216,10 +289,27 @@ static const char *dumpost_log_file(cmd_parms *cmd, void *_cfg, const char *arg 
     return NULL;
 }
 
+static const char *dumpost_log_binary(cmd_parms *cmd, void *_cfg, const char *arg ){
+    dumpost_cfg_t *cfg = (dumpost_cfg_t *) _cfg;
+	if (strstr(arg, "On") != NULL || strstr(arg, "1") != NULL)
+		cfg->log_bin = 1;
+	else
+		cfg->log_bin = 0;
+    return NULL;
+}
+
+static const char *dumpost_filter(cmd_parms *cmd, void *_cfg, const char *arg) {
+    dumpost_cfg_t *cfg = (dumpost_cfg_t *) _cfg;
+    *(const char**) apr_array_push(cfg->filters) = arg;
+    return NULL;
+}
+
 static const command_rec dumpost_cmds[] = {
     AP_INIT_TAKE1("DumpPostMaxSize", dumpost_set_max_size, NULL,  RSRC_CONF, "Set maximum data size"),
     AP_INIT_ITERATE("DumpPostHeaderAdd", dumpost_add_header, NULL, RSRC_CONF, "Add header to log"),
     AP_INIT_TAKE1("DumpPostLogFile", dumpost_log_file, NULL, RSRC_CONF, "A custom file to log to"),
+    AP_INIT_TAKE1("DumpPostLogBinary", dumpost_log_binary, NULL, RSRC_CONF, "Should log binary data (On/Off)"),
+	AP_INIT_ITERATE("DumpPostFilter", dumpost_filter, NULL, RSRC_CONF, "Add matches to filter by text in the fist header"),
     { NULL }
 };
 

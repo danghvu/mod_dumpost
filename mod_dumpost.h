@@ -19,6 +19,7 @@
 #ifndef __MOD_DUMPOST__
 #define __MOD_DUMPOST__
 
+#define LOG_IS_FULL -1
 #define DEFAULT_MAX_SIZE 1024*1024
 #define min(a,b) (a)<(b)?(a):(b)
 #define CREATEMODE ( APR_UREAD | APR_UWRITE | APR_GREAD )
@@ -28,6 +29,8 @@ typedef struct dumpost_cfg_t {
     apr_size_t max_size;
     apr_array_header_t *headers;
     char *file;
+    apr_array_header_t *filters;
+	int log_bin;
 } dumpost_cfg_t;
 
 typedef struct {
